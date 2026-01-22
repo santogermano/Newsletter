@@ -809,9 +809,16 @@ input[type="checkbox"]{width:18px;height:18px;accent-color:var(--accent);cursor:
       <div class="ve-preview-header">
         <h3>Preview</h3>
         <div class="controls-row">
+          <label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer;padding:4px 8px;border-radius:6px;background:#f1f5f9">
+            <input type="checkbox" id="veLiveEditToggle" style="margin:0">
+            <span>Live Edit</span>
+          </label>
           <label style="font-size:12px;color:var(--muted)">Zoom</label>
           <input type="range" id="veZoomRange" min="0.5" max="1.5" step="0.1" value="0.8" style="width:100px">
         </div>
+      </div>
+      <div id="veLiveEditHint" style="display:none;background:#dbeafe;color:#1e40af;padding:8px 16px;font-size:12px;border-bottom:1px solid #93c5fd">
+        <strong>Live Edit Mode:</strong> Click on any title or text in the preview to edit it directly. Press Enter or click outside to save.
       </div>
       <div class="ve-preview-content">
         <div class="ve-preview-frame-wrap">
@@ -845,6 +852,24 @@ input[type="checkbox"]{width:18px;height:18px;accent-color:var(--accent);cursor:
       <div class="ve-quick-edit-field">
         <label for="veEditLink">Link URL</label>
         <input type="url" id="veEditLink" placeholder="https://...">
+      </div>
+      <div class="ve-quick-edit-field">
+        <label for="veEditImage">Image URL</label>
+        <div style="display:flex;gap:8px;align-items:flex-start">
+          <div style="flex:1">
+            <input type="url" id="veEditImage" placeholder="https://... (paste image URL or upload)">
+            <div class="hint" style="margin-top:4px">Used for featured articles. Leave empty to use article's original image.</div>
+          </div>
+          <label class="btn" style="cursor:pointer;flex-shrink:0" for="veImageUpload">
+            <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
+            Upload
+          </label>
+          <input type="file" id="veImageUpload" accept="image/*" style="display:none">
+        </div>
+        <div id="veImagePreview" style="margin-top:8px;display:none">
+          <img id="veImagePreviewImg" style="max-width:200px;max-height:120px;border-radius:8px;border:1px solid var(--border)">
+          <button type="button" class="btn" id="veImageRemove" style="margin-left:8px;padding:4px 8px;font-size:12px">Remove</button>
+        </div>
       </div>
       <div class="ve-quick-edit-field">
         <label for="veEditSection">Section</label>
@@ -3374,27 +3399,15 @@ function buildHeader(){
   const intro = esc(introRaw).replace(/\r\n|\r|\n/g, "<br>");
   const introHtml = (introRaw.trim().length ? intro : "");
 
-  // Outlook-safe accent bar color: strong on white, otherwise match foreground for contrast
-  const accentBar = (String(bg||"").toLowerCase()==="#ffffff") ? "#3b82f6" : (fg==="#ffffff" ? "#ffffff" : "#0f172a");
-
-  // Only show issue number row if there's an issue number
-  const issueRow = issue ? `
-          <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;margin-bottom:16px;">
-            <tr>
-              <td style="width:4px;background:${accentBar};border-radius:2px;"></td>
-              <td style="padding-left:12px;">
-                <p style="margin:0;color:${muted};font-size:11px;line-height:1.3;letter-spacing:0.08em;text-transform:uppercase;font-weight:700;mso-line-height-rule:exactly;">${issue}</p>
-              </td>
-            </tr>
-          </table>` : '';
-
   return `<tr><td style="background:${bg};padding:32px 32px 24px;text-align:left;font-family:${getFontStack()};${msoFontFamilyCSS()}">
     <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;mso-table-lspace:0pt;mso-table-rspace:0pt;">
       <tr>
         <td valign="top" style="padding:0;">
-          ${issueRow}
           <p style="margin:0;color:${fg};font-family:${getFontStack()};${msoFontFamilyCSS()}font-size:34px;line-height:1.15;font-weight:800;letter-spacing:-0.5px;mso-line-height-rule:exactly;">${title}</p>
         </td>
+        ${issue ? `<td valign="top" align="right" style="padding:0;white-space:nowrap;">
+          <p style="margin:0;color:${muted};font-size:12px;line-height:1.3;letter-spacing:0.05em;text-transform:uppercase;font-weight:700;mso-line-height-rule:exactly;">${issue}</p>
+        </td>` : ''}
       </tr>
     </table>
     ${introHtml ? `<p style="margin:18px 0 0;color:${muted};font-family:${getFontStack()};${msoFontFamilyCSS()}font-size:15px;line-height:1.65;mso-line-height-rule:exactly;">${introHtml}</p>` : ''}
@@ -4159,7 +4172,11 @@ const VisualEditor = {
     $("veEditPreview").value = article.preview || "";
     $("veEditComment").value = article.comment || "";
     $("veEditLink").value = article.link || "";
+    $("veEditImage").value = article.image || "";
     $("veEditFeatured").checked = !!article.featured;
+
+    // Show image preview if exists
+    this.updateImagePreview(article.image);
 
     // Populate section dropdown
     const sectionSelect = $("veEditSection");
@@ -4177,9 +4194,25 @@ const VisualEditor = {
     $("veQuickEditModal").classList.add("active");
   },
 
+  updateImagePreview(url) {
+    const preview = $("veImagePreview");
+    const img = $("veImagePreviewImg");
+    if (url && url.trim()) {
+      img.src = url;
+      preview.style.display = "flex";
+      preview.style.alignItems = "center";
+    } else {
+      preview.style.display = "none";
+      img.src = "";
+    }
+  },
+
   closeQuickEdit() {
     $("veQuickEditModal").classList.remove("active");
     this.editingArticleId = null;
+    // Reset image preview
+    $("veImagePreview").style.display = "none";
+    $("veImagePreviewImg").src = "";
   },
 
   saveQuickEdit() {
@@ -4192,6 +4225,7 @@ const VisualEditor = {
     article.preview = $("veEditPreview").value;
     article.comment = $("veEditComment").value;
     article.link = $("veEditLink").value;
+    article.image = $("veEditImage").value;
     article.featured = $("veEditFeatured").checked;
 
     const newSection = $("veEditSection").value;
@@ -4299,6 +4333,177 @@ const VisualEditor = {
         this.closeQuickEdit();
       }
     });
+
+    // Live edit toggle
+    const liveEditToggle = $("veLiveEditToggle");
+    if (liveEditToggle) {
+      liveEditToggle.addEventListener("change", () => {
+        this.liveEditEnabled = liveEditToggle.checked;
+        const hint = $("veLiveEditHint");
+        if (hint) {
+          hint.style.display = this.liveEditEnabled ? "block" : "none";
+        }
+        // Re-attach live editing if enabled
+        if (this.liveEditEnabled) {
+          const frame = $("vePreviewFrameNew");
+          if (frame) this.attachLiveEditing(frame);
+        } else {
+          // Disable editing
+          const frame = $("vePreviewFrameNew");
+          if (frame && frame.contentDocument) {
+            frame.contentDocument.querySelectorAll('[contenteditable="true"]').forEach(el => {
+              el.removeAttribute("contenteditable");
+            });
+          }
+        }
+      });
+    }
+
+    // Image URL input - update preview on change
+    const imageInput = $("veEditImage");
+    if (imageInput) {
+      imageInput.addEventListener("input", () => {
+        this.updateImagePreview(imageInput.value);
+      });
+    }
+
+    // Image file upload
+    const imageUpload = $("veImageUpload");
+    if (imageUpload) {
+      imageUpload.addEventListener("change", (e) => {
+        const file = e.target.files && e.target.files[0];
+        if (!file) return;
+
+        // Convert to base64 data URL
+        const reader = new FileReader();
+        reader.onload = (evt) => {
+          const dataUrl = evt.target.result;
+          $("veEditImage").value = dataUrl;
+          this.updateImagePreview(dataUrl);
+          toast("Image uploaded", "success");
+        };
+        reader.onerror = () => {
+          toast("Failed to read image", "error");
+        };
+        reader.readAsDataURL(file);
+
+        // Reset input for future uploads
+        imageUpload.value = "";
+      });
+    }
+
+    // Remove image button
+    const removeImage = $("veImageRemove");
+    if (removeImage) {
+      removeImage.addEventListener("click", () => {
+        $("veEditImage").value = "";
+        this.updateImagePreview("");
+      });
+    }
+
+    // Enable live editing in preview
+    this.initLiveEditing();
+  },
+
+  initLiveEditing() {
+    // Add click handler for live editing in preview
+    const self = this;
+
+    // Watch for preview frame loads to attach live editing
+    const frame = $("vePreviewFrameNew");
+    if (frame) {
+      frame.addEventListener("load", () => {
+        self.attachLiveEditing(frame);
+      });
+    }
+  },
+
+  liveEditEnabled: false,
+
+  attachLiveEditing(frame) {
+    if (!frame || !frame.contentDocument) return;
+    if (!this.liveEditEnabled) return; // Only attach if live edit is enabled
+    const doc = frame.contentDocument;
+
+    // Inject live editing styles
+    if (!doc.getElementById("liveEditStyles")) {
+      const style = doc.createElement("style");
+      style.id = "liveEditStyles";
+      style.textContent = `
+        [data-nl="article-title"],
+        [data-nl="article-body"],
+        [data-nl="section-title"] {
+          cursor: text;
+          outline: none;
+          transition: box-shadow 0.15s ease;
+        }
+        [data-nl="article-title"]:hover,
+        [data-nl="article-body"]:hover,
+        [data-nl="section-title"]:hover {
+          box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.3);
+        }
+        [data-nl="article-title"]:focus,
+        [data-nl="article-body"]:focus,
+        [data-nl="section-title"]:focus {
+          box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.6);
+        }
+        .live-edit-active {
+          background: rgba(59, 130, 246, 0.05) !important;
+        }
+      `;
+      doc.head.appendChild(style);
+    }
+
+    // Make text elements editable
+    doc.querySelectorAll('[data-nl="article-title"], [data-nl="article-body"], [data-nl="section-title"]').forEach(el => {
+      el.setAttribute("contenteditable", "true");
+      el.setAttribute("spellcheck", "false");
+
+      // Track changes
+      el.addEventListener("focus", () => {
+        el.classList.add("live-edit-active");
+      });
+
+      el.addEventListener("blur", () => {
+        el.classList.remove("live-edit-active");
+        // Sync changes back to htmlCode
+        this.syncLiveEdits(frame);
+      });
+
+      el.addEventListener("keydown", (e) => {
+        if (e.key === "Enter" && !e.shiftKey) {
+          e.preventDefault();
+          el.blur();
+        }
+      });
+    });
+
+    // Disable link navigation
+    doc.querySelectorAll("a").forEach(a => {
+      a.addEventListener("click", (e) => {
+        e.preventDefault();
+      });
+    });
+  },
+
+  syncLiveEdits(frame) {
+    if (!frame || !frame.contentDocument) return;
+
+    try {
+      // Get the updated HTML from the iframe
+      const doc = frame.contentDocument;
+      const body = doc.body;
+      if (!body) return;
+
+      // Update the main htmlCode
+      htmlCode = "<!DOCTYPE html><html>" + doc.documentElement.innerHTML + "</html>";
+
+      // Also update the main preview
+      refreshPreview();
+      toast("Changes synced", "success");
+    } catch (e) {
+      console.warn("Failed to sync live edits:", e);
+    }
   }
 };
 
